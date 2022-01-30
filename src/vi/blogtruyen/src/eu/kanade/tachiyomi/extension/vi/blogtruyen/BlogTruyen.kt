@@ -14,6 +14,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import org.json.JSONArray
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -170,6 +171,18 @@ class BlogTruyen : ParsedHttpSource() {
         document.select("article#content > img").forEachIndexed { i, e ->
             pages.add(Page(i, pageUrl, e.attr("src")))
         }
+
+        // Some chapters use js script to render images
+        val script = document.select("article#content > script").lastOrNull()
+        if (script != null && script.data().contains("listImageCaption")) {
+            val imagesStr = script.data().split(";")[0].split("=").last().trim()
+            val imageArr = JSONArray(imagesStr)
+            for (i in 0 until imageArr.length()) {
+                val imageUrl = imageArr.getJSONObject(i).getString("url")
+                pages.add(Page(pages.size, pageUrl, imageUrl))
+            }
+        }
+
         return pages
     }
 
