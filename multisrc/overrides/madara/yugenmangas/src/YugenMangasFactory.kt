@@ -4,6 +4,7 @@ import eu.kanade.tachiyomi.lib.ratelimit.RateLimitInterceptor
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.source.SourceFactory
 import eu.kanade.tachiyomi.source.model.SChapter
+import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -19,11 +20,9 @@ class YugenMangasFactory : SourceFactory {
 
 abstract class YugenMangas(
     override val baseUrl: String,
-    override val lang: String,
+    lang: String,
     dateFormat: SimpleDateFormat = SimpleDateFormat("MMMMM dd, yyyy", Locale.US)
 ) : Madara("YugenMangas", baseUrl, lang, dateFormat) {
-
-    override fun popularMangaSelector() = "div.page-item-detail.manga"
 
     override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
         name = element.selectFirst("a")!!.ownText()
@@ -49,7 +48,8 @@ class YugenMangasBr : YugenMangas(
         .addInterceptor(RateLimitInterceptor(1, 2, TimeUnit.SECONDS))
         .build()
 
-    override val altName: String = "Nome alternativo: "
+    override fun headersBuilder(): Headers.Builder = Headers.Builder()
+        .add("Referer", baseUrl)
 
     override val useNewChapterEndpoint: Boolean = true
 }

@@ -14,8 +14,10 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import uy.kohesive.injekt.injectLazy
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -30,9 +32,18 @@ class Tappytoon(override val lang: String) : HttpSource() {
 
     override val client = network.client.newBuilder().addInterceptor { chain ->
         val res = chain.proceed(chain.request())
-        if (res.isSuccessful) return@addInterceptor res
+        val mime = res.headers["Content-Type"]
+        if (res.isSuccessful) {
+            if (mime != "application/octet-stream")
+                return@addInterceptor res
+            // Fix image content type
+            val type = IMG_CONTENT_TYPE.toMediaType()
+            val body = res.body!!.bytes().toResponseBody(type)
+            return@addInterceptor res.newBuilder().body(body)
+                .header("Content-Type", IMG_CONTENT_TYPE).build()
+        }
         // Throw JSON error if available
-        if (res.headers["Content-Type"] == "application/json") {
+        if (mime == "application/json") {
             res.body?.string()?.let(json::parseToJsonElement)?.run {
                 throw Error(jsonObject["message"]!!.jsonPrimitive.content)
             }
@@ -192,6 +203,8 @@ class Tappytoon(override val lang: String) : HttpSource() {
         throw UnsupportedOperationException("Not used")
 
     companion object {
+        private const val IMG_CONTENT_TYPE = "image/jpeg"
+
         private val apiUrl = "https://api-global.tappytoon.com".toHttpUrl()
 
         private val genres = mapOf(

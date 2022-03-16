@@ -25,6 +25,7 @@ import org.jsoup.nodes.Element
 import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.text.DecimalFormat
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -47,7 +48,15 @@ class Readmanga : ConfigurableSource, ParsedHttpSource() {
     private val rateLimitInterceptor = RateLimitInterceptor(2)
 
     override val client: OkHttpClient = network.client.newBuilder()
-        .addNetworkInterceptor(rateLimitInterceptor).build()
+        .addNetworkInterceptor(rateLimitInterceptor)
+        .addNetworkInterceptor { chain ->
+            val originalRequest = chain.request()
+            val response = chain.proceed(originalRequest)
+            if (originalRequest.url.toString().contains(baseUrl) and (originalRequest.url.toString().contains("internal/redirect") or (response.code == 301)))
+                throw Exception("Манга переехала на другой адрес/ссылку!")
+            response
+        }
+        .build()
 
     private var uagent: String = preferences.getString(UAGENT_TITLE, UAGENT_DEFAULT)!!
     override fun headersBuilder() = Headers.Builder().apply {
@@ -143,7 +152,7 @@ class Readmanga : ConfigurableSource, ParsedHttpSource() {
         }
 
         val ratingValue = infoElement.select(".col-sm-7 .rating-block").attr("data-score").toFloat() * 2
-        val ratingValueOver = infoElement.select(".info-icon").attr("data-content").substringAfter("Относительно остальных произведений: <b>").substringBefore("/5</b>").replace(",", ".").toFloat() * 2
+        val ratingValueOver = infoElement.select(".info-icon").attr("data-content").substringBeforeLast("/5</b><br/>").substringAfterLast(": <b>").replace(",", ".").toFloat() * 2
         val ratingVotes = infoElement.select(".col-sm-7 .user-rating meta[itemprop=\"ratingCount\"]").attr("content")
         val ratingStar = when {
             ratingValue > 9.5 -> "★★★★★"
@@ -211,10 +220,11 @@ class Readmanga : ConfigurableSource, ParsedHttpSource() {
 
     private fun chapterFromElement(element: Element, manga: SManga): SChapter {
         val urlElement = element.select("a").first()
+        val chapterInf = element.select("td.item-title").first()
         val urlText = urlElement.text()
 
         val chapter = SChapter.create()
-        chapter.setUrlWithoutDomain(urlElement.attr("href") + "?mtr=1")
+        chapter.setUrlWithoutDomain(urlElement.attr("href") + "?mtr=true") // mtr is 18+ skip
 
         var translators = ""
         val translatorElement = urlElement.attr("title")
@@ -238,6 +248,8 @@ class Readmanga : ConfigurableSource, ParsedHttpSource() {
             chapter.name = chapter.name.substringAfter("…").trim()
         }
 
+        chapter.chapter_number = chapterInf.attr("data-num").toFloat() / 10
+
         chapter.date_upload = element.select("td.d-none").last()?.text()?.let {
             try {
                 SimpleDateFormat("dd.MM.yy", Locale.US).parse(it)?.time ?: 0L
@@ -253,20 +265,18 @@ class Readmanga : ConfigurableSource, ParsedHttpSource() {
     }
 
     override fun prepareNewChapter(chapter: SChapter, manga: SManga) {
-        val basic = Regex("""\s*([0-9]+)(\s-\s)([0-9]+)\s*""")
         val extra = Regex("""\s*([0-9]+\sЭкстра)\s*""")
         val single = Regex("""\s*Сингл\s*""")
         when {
-            basic.containsMatchIn(chapter.name) -> {
-                basic.find(chapter.name)?.let {
-                    val number = it.groups[3]?.value!!
-                    chapter.chapter_number = number.toFloat()
-                }
+            extra.containsMatchIn(chapter.name) -> {
+                if (chapter.name.substringAfter("Экстра").trim().isEmpty())
+                    chapter.name = chapter.name.replaceFirst(" ", " - " + DecimalFormat("#,###.##").format(chapter.chapter_number).replace(",", ".") + " ")
             }
-            extra.containsMatchIn(chapter.name) -> // Extra chapters doesn't contain chapter number
-                chapter.chapter_number = -2f
-            single.containsMatchIn(chapter.name) -> // Oneshoots, doujinshi and other mangas with one chapter
-                chapter.chapter_number = 1f
+
+            single.containsMatchIn(chapter.name) -> {
+                if (chapter.name.substringAfter("Сингл").trim().isEmpty())
+                    chapter.name = DecimalFormat("#,###.##").format(chapter.chapter_number).replace(",", ".") + " " + chapter.name
+            }
         }
     }
 

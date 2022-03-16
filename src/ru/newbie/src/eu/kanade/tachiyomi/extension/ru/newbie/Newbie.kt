@@ -38,7 +38,9 @@ import java.util.Date
 import java.util.Locale
 
 class Newbie : HttpSource() {
-    override val name = "Newbie"
+    override val name = "NewManga(Newbie)"
+
+    override val id: Long = 8033757373676218584
 
     override val baseUrl = "https://newmanga.org"
 
@@ -58,7 +60,7 @@ class Newbie : HttpSource() {
         }
 
         val response = chain.proceed(chain.request())
-        val image = response.body?.byteString()?.toResponseBody("image/webp".toMediaType())
+        val image = response.body?.byteString()?.toResponseBody("image/*".toMediaType())
         return response.newBuilder().body(image).build()
     }
 
@@ -82,7 +84,7 @@ class Newbie : HttpSource() {
         val mangas = page.items.map {
             it.toSManga()
         }
-        return MangasPage(mangas, mangas.size == count)
+        return MangasPage(mangas, mangas.isNotEmpty())
     }
 
     private fun LibraryDto.toSManga(): SManga {
@@ -160,6 +162,12 @@ class Newbie : HttpSource() {
             else -> type
         }
     }
+    private fun parseAge(adult: String): String {
+        return when (adult) {
+            "" -> "0+"
+            else -> "$adult+"
+        }
+    }
 
     private fun MangaDetDto.toSManga(): SManga {
         val ratingValue = DecimalFormat("#,###.##").format(rating * 2).replace(",", ".").toFloat()
@@ -185,7 +193,7 @@ class Newbie : HttpSource() {
             author = o.author?.name
             artist = o.artist?.name
             description = o.title.ru + "\n" + ratingStar + " " + ratingValue + "\n" + Jsoup.parse(o.description).text()
-            genre = genres.joinToString { it.title.ru.capitalize() } + ", " + parseType(type) + ", " + "$adult+"
+            genre = parseType(type) + ", " + adult?.let { parseAge(it) } + ", " + genres.joinToString { it.title.ru.capitalize() }
             status = parseStatus(o.status)
         }
     }
@@ -283,7 +291,7 @@ class Newbie : HttpSource() {
         val result = mutableListOf<Page>()
         pages.forEach { page ->
             (1..page.slices!!).map { i ->
-                result.add(Page(result.size, "", API_URL + chapter.url + "/${page.id}?slice=$i"))
+                result.add(Page(result.size, API_URL + chapter.url + "/${page.id}?slice=$i"))
             }
         }
         return result
@@ -298,7 +306,13 @@ class Newbie : HttpSource() {
             }
     }
 
-    override fun fetchImageUrl(page: Page): Observable<String> = Observable.just(page.imageUrl!!)
+    override fun fetchImageUrl(page: Page): Observable<String> {
+        val bodyLength = client.newCall(GET(page.url, headers)).execute().body!!.contentLength()
+        return if (bodyLength > 320)
+            Observable.just(page.url)
+        else
+            Observable.just("$baseUrl/error-page/img/logo-fullsize.png")
+    }
 
     override fun imageUrlRequest(page: Page): Request = throw NotImplementedError("Unused")
 
